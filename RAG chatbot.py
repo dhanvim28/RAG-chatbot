@@ -3,15 +3,17 @@ import os
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.readers.web import SimpleWebPageReader
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.llms.openai import OpenAI # We won't initialize this directly
+from llama_index.core.llms import MockLLM  # <--- FIX: Import the free placeholder LLM
 
 # 1. SETUP FREE LOCAL EMBEDDING MODEL (Runs on the server for free)
 @st.cache_resource
 def load_free_embed_model():
-    # Downloads a tiny, powerful open-source mathematical map model (~100MB)
+    # Downloads a tiny, powerful open-source mathematical mapping model (~100MB)
     return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
+# Assign the free models globally so LlamaIndex never triggers OpenAI
 Settings.embed_model = load_free_embed_model()
+Settings.llm = MockLLM()  # <--- FIX: Forces LlamaIndex to skip checking for OpenAI keys!
 
 # Setup a temporary directory to store uploaded files
 TEMP_DIR = "./uploaded_files"
@@ -84,9 +86,7 @@ with st.sidebar:
             with st.spinner("Building Knowledge Base Index..."):
                 index = VectorStoreIndex.from_documents(documents)
                 
-                # Because we don't have an LLM API key, we fallback to a mock generator 
-                # or local prompt context builder. To ensure a smart chat works 100% keyless,
-                # we configure the engine to fetch context blocks directly.
+                # Convert into a context retriever (gathers the top 3 closest chunks)
                 st.session_state.chat_engine = index.as_query_engine(similarity_top_k=3)
             st.success("Brain successfully built! Ask your questions on the right. 👉")
         else:
@@ -114,8 +114,17 @@ if user_query := st.chat_input("Ask something about your data..."):
                 # Pulls relevant passages right out of your PDFs/websites instantly
                 response = st.session_state.chat_engine.query(user_query)
                 
-                # Format a friendly layout displaying the exact text found
-                response_text = f"### Found Information:\n{response.response}\n\n"
+                # Format a friendly layout displaying the exact source text found
+                response_text = f"### Found Information:\n"
+                
+                # Display individual context nodes extracted from documents
+                if hasattr(response, "source_nodes") and response.source_nodes:
+                    for i, node in enumerate(response.source_nodes):
+                        file_info = node.node.metadata.get('file_name', 'Web/Unknown Source')
+                        response_text += f"**Source {i+1} (From: {file_info}):**\n>{node.node.get_content()}\n\n"
+                else:
+                    response_text += "No matching information chunks found in your documents."
+                    
                 st.markdown(response_text)
                 
     st.session_state.messages.append({"role": "assistant", "content": response_text})
