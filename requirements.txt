@@ -1,0 +1,6 @@
+streamlit
+llama-index
+llama-index-llms-openai
+llama-index-readers-web
+docx2txt
+pypdf
